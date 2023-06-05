@@ -160,35 +160,152 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
+/* 유저가 입력한 명령어를 수행하도록 프로그램을 메모리에 적재하고 실행하는 함수
+ * 여기에 파일 네임 인자로 받아서 저장(문자열)
+ * → 근데 실행프로그램 파일과 옵션이 분리되지 않은 상황
+ * 현재 실행중인 스레드의 context를 f_name에 해당하는 명령을 실행하기 위해
+ * context switching 하는 역할
+ * 즉, 우리가 입력해주는 명령을 받기 직전에 어떤 스레드가 돌고 있었을 테니(그게 idle이든 실제 실행중이든)
+ * process_exec()에 context switching 역할도 같이 넣어줘야 함
+ * */
+// int
+// process_exec (void *f_name) {
+// 	/* f_name은 문자열인데 위에서 (void *)로 넘겨받음
+// 	 * → 문자열로 인식하기 위해서 char * 로 변환해줘야 */
+// 	char *file_name = f_name;
+// 	bool success;
+
+// 	/* 추가코드 */
+// 	/* ---project 2 : command_line_parsing */
+// 	/* 원본 file name을 copy 해오기
+// 	 * 원본 문자열을 parsing하면 다른 함수에서 원본 문자열을 쓸 여지가 있으니 따로 복사본 생성
+// 	 * gitbook : 핀토스가 커널에 통과시킬 수 있는 커맨드라인의 인자길이 제한은 128바이트*/
+// 	char file_name_copy[128];	//스택에 저장
+// 	// file_name_copy = palloc_get_page(PAL_USER);	//이렇게는 가능 but 비효율적
+// 	/* Q. strlen에 +1 ?
+// 	 * A. 원래 문자열에는 \n이 들어가는데 strlen에서는 \n앞까지만 읽고 끝내기 때문.
+// 	       전체를 들고오기 위해 +1 
+// 	 * 128자 길이로 file_name_copy를 만들어주고 memcpy로 file_name 문자열을 저장 */
+// 	memcpy(file_name_copy, file_name, strlen(file_name)+1);
+// 	//여기까지
+
+// 	/* We cannot use the intr_frame in the thread structure.
+// 	 * This is because when current thread rescheduled,
+// 	 * it stores the execution information to the member. */
+// 	/* intr_frame 내 구조체 멤버에 필요한 정보를 담는다
+// 	 * 여기서 intr_frame은 인터럽트 스택 프레임
+// 	 * 인터럽트 프레임은 인터럽트가 들어왔을 때,
+// 	 * 이전에 레지스터에 작업하던 context를 switching하기 위해 이 정보를 담아놓는 구조체
+// 	 * 인터럽트 프레임은 인터럽트와 같은 요청이 들어와서 기존까지 실행중이던 context(레지스터 값포함)를
+// 	 * 스택에 저장하기 위한 구조체*/
+// 	struct intr_frame _if;
+// 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
+// 	_if.cs = SEL_UCSEG;
+// 	_if.eflags = FLAG_IF | FLAG_MBS;
+
+// 	/* We first kill the current context */
+// 	/* 새로운 실행 파일을 현재 스레드에 담기 전에
+// 	 * 먼저 현재 process에 담긴 context를 지워준다
+// 	 * 지운다? → 현재 프로세스에 할당된 page directory를 지운다는 뜻
+// 	 */
+// 	process_cleanup ();
+
+// 	/* 추가 */
+// 	memset(&_if, 0, sizeof _if);
+// 	/* 여기까지 */
+
+// 	/* And then load the binary */
+// 	/* file_name. _if를 현재 프로세스에 Load
+// 	 * success는 bool type이니까 Load에 성공하면 1, 실패하면 0 반환.
+// 	 * 이 때 file_name : f_name의 첫 문자열을 parsing하여 넘겨줘야 한다.*/
+// 	// success = load (file_name, &_if);
+// 	/*윗줄 주석처리 후 추가코드*/
+// 	/* file_name, _if를 현재 프로세스에 Load */
+// 	success = load(file_name, &_if);
+// 	/*여기까지*/
+
+
+// 	/* If load failed, quit. */
+// 	/* file_name : 프로그램 파일 받기 위해 만든 임시변수.
+// 	 * 따라서 Load 끝나면 메모리 반환
+// 	 * Q. page를 할당해 준 적이 없는데 왜 free?
+// 	 * A. palloc()은 load() 함수 내에서 file_name을 메모리에 올리는 과정에서
+// 	 * page allocation을 해준다.
+// 	 * 이 때 페이지를 할당해주는 걸 임시로 해주는 것*/
+// 	//palloc_free_page (file_name);
+// 	if (!success)
+// 		return -1;
+
+// 	/* 추가 */
+// 	hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
+// 	/*여기까지 */
+
+// 	/* Start switched process. */
+// 	/* 만약 load가 실행됐다면 context switching을 진행*/
+// 	do_iret(&_if);
+// 	NOT_REACHED ();
+// }
 int
 process_exec (void *f_name) {
+	/* f_name은 문자열인데 위에서 (void *)로 넘겨받음
+	 * → 문자열로 인식하기 위해서 char * 로 변환해줘야 */
 	char *file_name = f_name;
 	bool success;
 
+	/* 추가코드 */
+	/* ---project 2 : command_line_parsing */
+	/* 원본 file name을 copy 해오기
+	 * 원본 문자열을 parsing하면 다른 함수에서 원본 문자열을 쓸 여지가 있으니 따로 복사본 생성
+	 * gitbook : 핀토스가 커널에 통과시킬 수 있는 커맨드라인의 인자길이 제한은 128바이트*/
+	char file_name_copy[128];	//스택에 저장
+	// file_name_copy = palloc_get_page(PAL_USER);	//이렇게는 가능 but 비효율적
+	/* Q. strlen에 +1 ?
+	 * A. 원래 문자열에는 \n이 들어가는데 strlen에서는 \n앞까지만 읽고 끝내기 때문.
+	       전체를 들고오기 위해 +1 
+	 * 128자 길이로 file_name_copy를 만들어주고 memcpy로 file_name 문자열을 저장 */
+	memcpy(file_name_copy, file_name, strlen(file_name)+1);
+	//여기까지
+
+    
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
-	struct intr_frame _if;
+	struct intr_frame _if; // intr_frame 내 구조체 멤버에 필요한 정보를 담는다.
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
 	process_cleanup ();
+	// 새로운 실행 파일을 현재 스레드에 담기 전에 먼저 현재 process에 담긴 context를 지워준다.
+	// 지운다? => 현재 프로세스에 할당된 page directory를 지운다는 뜻.
+
+	
+	/* --- Project 2: Command_line_parsing ---*/
+	memset(&_if, 0, sizeof _if);
+	/* --- Project 2: Command_line_parsing ---*/
+
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
-
+	success = load (file_name_copy, &_if); // file_name, _if를 현재 프로세스에 load.
+	// success는 bool type이니까 load에 성공하면 1, 실패하면 0 반환.
+	// 이때 file_name: f_name의 첫 문자열을 parsing하여 넘겨줘야 한다!
+	// _if: context switching에 필요한 정보.
+	
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
 	if (!success)
+	{
 		return -1;
+	}
 
+	hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
+	/* --- Project 2: Command_line_parsing ---*/
+	//palloc_free_page (file_name); // file_name: 프로그램 파일 받기 위해 만든 임시변수. 따라서 load 끝나면 메모리 반환.
 	/* Start switched process. */
+	
 	do_iret (&_if);
 	NOT_REACHED ();
 }
-
 
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
@@ -204,6 +321,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	/* 추가 */
+	while (1){}
+	/*여기까지*/
 	return -1;
 }
 
@@ -316,10 +436,63 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
 
+/* 추가함수 */
+/* 인자를 stack에 올린다. */
+void argument_stack (char **argv, int argc, struct intr_frame *if_) {
+
+	/* insert arguments' address */
+	char *arg_address[128];
+
+	//거꾸로 삽입 => 스택은 반대방향으로 확장하기 때문!
+
+	/* 맨 끝 NULL값(arg[4]) 제외하고 스택에 저장(arg[0] ~ arg[3]) */
+	for (int i = argc-1; i>=0; i--) {
+		int argv_len = strlen(argv[i]);
+		/*
+		if_->rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터.
+		각 인자에서 인자 크기(argv_len)를 읽고 (이때 각 인자에 sentinel이 포함되어 있으니 +1, strlen에서는 sentinel 빼고 읽음)
+		그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy를 해준다.
+		*/
+		if_->rsp = if_->rsp - (argv_len + 1);	// 스택 포인터를 넣어줄 공간만큼 쭉 내린다
+		memcpy(if_->rsp, argv[i], argv_len + 1);	// 해당 공간에 인자값 복붙
+		arg_address[i] = if_->rsp;	// arg_address 배열에 현재 문자열 시작 주소(인자값) 위치를 저장한다.
+	}
+
+	/* word-align : 8의 배수 맞추기 위해 padding 삽입 */
+	while (if_->rsp %8 != 0)
+	{
+		if_->rsp--;	//주소값을 1 내리고
+		*(uint8_t *) if_->rsp = 0;	//데이터에 0 삽입 => 8바이트 저장
+	}
+
+	/* 이제는 주소값 자체를 삽입! 이때 센티넬 포함해서 넣기 */
+
+	for (int i = argc; i >= 0; i--)
+	{	// 여기서는 NULL값 포인터도 같이 넣는다.
+		if_->rsp = if_->rsp - 8;	//8바이트만큼 내리고
+		if (i == argc) { //가장 위에는 NULL이 아닌 0을 넣어야지
+			memset(if_->rsp, 0, sizeof(char **));
+		} else {	// 나머지에는 arg_address 안에 들어있는 값 가져오기
+			memcpy(if_->rsp, &arg_address[i], sizeof(char **));	//char 포인터 크기: 8바이트
+		}
+
+	}
+
+	/* fake return address */
+	if_->rsp = if_->rsp - 8;	// void 포인터도 8바이트 크기
+	memset(if_->rsp, 0, sizeof(void *));
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8;	//fake_address 바로 위: arg_Address 맨 앞 가리키는 주소값!
+}
+
+/* 여기까지 */
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+/* parsing 작업을 해주는 코드를 load()안에 추가 */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -328,6 +501,24 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+
+	/* 추가코드 */
+	/* ---project 2 : command_line_parsing --- */
+	char *arg_list[128];
+	char *token, *save_ptr;
+	int token_count = 0;
+
+	token = strtok_r(file_name, " ", &save_ptr);	//첫번째 이름
+	//첫번째 이름을 받아온다. save_ptr : 앞에 애 자르고 남은 문자열의 가장 맨 앞으로 가리키는 포인터 주소값!
+	//token = strtok_r(file_name_total, " ", &save_ptr);
+	arg_list[token_count] = token;	//arg_list[0] = file_name_first
+
+	while (token != NULL) {
+		token = strtok_r (NULL, " ", &save_ptr);
+		token_count++;
+		arg_list[token_count] = token;
+	}
+	/*여기까지*/
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -416,6 +607,10 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	
+	/*추가*/
+	argument_stack(arg_list, token_count, if_);
+	/*여기까지*/
 
 	success = true;
 
@@ -424,6 +619,7 @@ done:
 	file_close (file);
 	return success;
 }
+
 
 
 /* Checks whether PHDR describes a valid, loadable segment in
@@ -569,6 +765,8 @@ install_page (void *upage, void *kpage, bool writable) {
 	return (pml4_get_page (t->pml4, upage) == NULL
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
+
+
 #else
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
