@@ -235,8 +235,19 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
+	// pro-2 추가 //
+	// 현재 스레드의 자식으로 추가
+	list_push_back(&thread_current()->child_list, &t->child_elem);
+
+	t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+	// t->fdt = palloc_get_page(PAL_ZERO);
+	if (t->fdt == NULL)
+		return TID_ERROR;
+	/*여기까지*/
+
 	/* Add to run queue. */
 	thread_unblock (t);
+	/*다름*/
 
 	/*추가: 새로 생선한 thread t를 unblock시켜서 ready queue에 줄 세우고 priority와 비교*/
 	if (cmp_priority (&t -> elem, &curr -> elem, NULL)) {
@@ -678,10 +689,19 @@ init_thread (struct thread *t, const char *name, int priority) {
 
 	/*추가*/
 	/*자료구조 초기화*/
-	t -> init_priority = priority;
-	t -> wait_on_lock = NULL;
-	list_init(&t -> donations);
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&(t -> donations));
 	/* 여기까지 */
+	/* pro2 - 추가 */
+	/*exit_sema와 wait_sema를 초기화한다*/
+	t->exit_status = 0;
+	t->next_fd = 2;
+	sema_init(&t->load_sema,0);
+	sema_init(&t->exit_sema, 0);
+	sema_init(&t->wait_sema, 0);
+	list_init(&(t->child_list));
+	/*여기까지*/
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
