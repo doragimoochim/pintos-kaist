@@ -140,7 +140,7 @@ page_fault (struct intr_frame *f) {
 	write = (f->error_code & PF_W) != 0;
 	user = (f->error_code & PF_U) != 0;
 	/* PRO2 - 추가 */
-	exit(-1);
+
 	/* 여기까지 */
 
 #ifdef VM
@@ -151,6 +151,7 @@ page_fault (struct intr_frame *f) {
 
 	/* Count page faults. */
 	page_fault_cnt++;
+	exit(-1);
 
 	/* If the fault is true fault, show info and exit. */
 	printf ("Page fault at %p: %s error %s page in %s context.\n",

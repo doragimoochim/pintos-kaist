@@ -114,6 +114,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	case SYS_CLOSE:
 		close(f->R.rdi);
+		break; //교수님 말씀
 	} //여기까지
 
 	// printf ("system call!\n");
@@ -132,8 +133,8 @@ void check_address(void *addr)
 	/* 함수 사용하여 addr에 대한 페이지를 가져옴
 	 * 페이지가 존재하지 않는 경우(NULL반환) → 프로세스 종료
 	 */
-	if (pml4_get_page(thread_current()->pml4, addr) == NULL)
-		exit(-1);
+	// if (pml4_get_page(thread_current()->pml4, addr) == NULL)
+	// 	exit(-1);
 }
 
 /* pro-2 추가 */

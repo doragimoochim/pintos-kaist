@@ -101,14 +101,14 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 	struct thread *child = get_child_process(pid);
 
 	// 현재 스레드는 생성만 완료된 상태이다. 생성되어서 ready_list에 들어가고 실행될 때
-	//__do_fork 함수가 실행된다.
+	// __do_fork 함수가 실행된다.
 	//__do_fork 함수가 실행되어 로드가 완료될 때까지 부모는 대기한다
 	sema_down(&child->load_sema);
 
 	//자식이 로드되다가 오류로 exit한 경우
 	//고침//
 	// if (child->exit_status == TID_ERROR)
-	if (child->exit_status == -2)
+	if (child->exit_status == TID_ERROR)
 	{
 		//자식이 종료되었으므로 자식 리스트에서 제거한다.
 		// 이거 넣으면 간헐적으로 실패함 (syn-read)
@@ -239,7 +239,7 @@ __do_fork(void *aux)
 	//next_fd도 복제
 	current->next_fd = parent->next_fd;
 
-	//로드가 완료될 때까지 기다리고 있던 부모 대기 해제
+	// 로드가 완료될 때까지 기다리고 있던 부모 대기 해제
 	sema_up(&current->load_sema);
 	/* 여기까지 */
 	process_init();
@@ -253,7 +253,7 @@ error:
 	// thread_exit ();
 	//고침//
 	// exit(TID_ERROR);
-	exit(-2);
+	exit(TID_ERROR);
 	/* 여기까지 */
 }
 
@@ -269,7 +269,7 @@ error:
  * */
 
 int process_exec(void *f_name)
-{
+{ // 인자: 실행하려는 이진 파일의 이름
 	char *file_name = f_name;
 	bool success;
 	
@@ -291,16 +291,15 @@ int process_exec(void *f_name)
 	/* token이 NULL일때까지 반복 */
 	/* strtok_r 함수에 NULL값을 받아온다면 이전 호출 이후의 남은 문자열에서 토큰을 찾음, 따라서 token에는 다음 문자 저장*/
 	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
-	{
 		parse[count++] = token;
-	}
-
+	
 	/* And then load the binary */
 	success = load(file_name, &_if);
 	// 이진 파일을 디스크에서 메모리로 로드한다.
 	// 이진 파일에서 실행하려는 명령의 위치를 얻고 (if_.rip)
 	// user stack의 top 포인터를 얻는다. (if_.rsp)
 	// 위 과정을 성공하면 실행을 계속하고, 실패하면 스레드가 종료된다.
+
 	/* If load failed, quit. */
 	if (!success)
 	{
@@ -308,12 +307,12 @@ int process_exec(void *f_name)
 		return -1;
 	}
 	
-	argument_stack(parse,count,&_if.rsp);
+	argument_stack(parse, count, &_if.rsp); // 함수 내부에서 parse와 rsp의 값을 직접 변경하기 위해 주소 전달
 	/*if 구조체의 필드값 갱신*/
 	_if.R.rdi = count;
 	_if.R.rsi = (char *)_if.rsp + 8;
 	/*_if.rsp를 시작 주소로하여 메모리 덤프를 생성. 메모리 덤프의 크기는 16진수로*/
-	hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	//hex_dump(_if.rsp, _if.rsp, KERN_BASE - (uint64_t)_if.rsp, true);
 
 	/* If load failed, quit. */
@@ -328,7 +327,7 @@ int process_exec(void *f_name)
 /*추가*/
 void argument_stack(char **parse, int count, void **rsp) // 주소를 전달받았으므로 이중 포인터 사용
 {
-	//프로그램 이름, 인자 문자열 push
+	// 프로그램 이름, 인자 문자열 push
 	for (int i = count - 1; i > -1; i--)
 	{
 		for (int j = strlen(parse[i]); j > -1; j--)
@@ -339,7 +338,7 @@ void argument_stack(char **parse, int count, void **rsp) // 주소를 전달받�
 		parse[i] = *(char **)rsp; // parse[i]에 현재 rsp의 값 저장해둠(지금 저장한 인자가 시작하는 주소값)
 	}
 
-	//정렬패딩 push
+	// 정렬 패딩 push
 	int padding = (int)*rsp % 8;
 	for (int i = 0; i < padding; i++)
 	{
@@ -347,18 +346,18 @@ void argument_stack(char **parse, int count, void **rsp) // 주소를 전달받�
 		**(uint8_t **)rsp = 0; // rsp 직전까지 값 채움
 	}
 
-	//인자 문자열 종료를 나타내는 0 push
+	// 인자 문자열 종료를 나타내는 0 push
 	(*rsp) -= 8;
 	**(char ***)rsp = 0;	//char* 타입의 0 추가
 
-	//각 인자 문자열의 주소 push
+	// 각 인자 문자열의 주소 push
 	for (int i = count - 1; i > -1; i--)
 	{
 		(*rsp) -= 8;	//다음 주소로 이동
 		**(char ***)rsp = parse[i];	//char*타입의 주소 추가
 	}
 
-	//return address push
+	// return address push
 	(*rsp) -= 8;
 	**(void ***)rsp = 0;	//void*타입의 0추가
 }
@@ -408,7 +407,7 @@ int process_wait(tid_t child_tid UNUSED)
 	 * → 자식 프로세스는 종료 상태를 부모 프로세스에게 알림 */
 	sema_up(&child->exit_sema);
 	// 자식의 exit_status(종료상태)를 반환한다.
-	return child->exit_status;
+	return child->exit_status; // 자식의 exit_status를 반환한다.
 	/*여기까지*/
 }
 
@@ -645,12 +644,12 @@ load(const char *file_name, struct intr_frame *if_)
 	/*여기까지*/
 
 	/* Set up stack. */
-	if (!setup_stack(if_)) //user stack초기화
+	if (!setup_stack(if_)) // user stack 초기화
 		goto done;
 
 	/* Start address. */
 	if_->rip = ehdr.e_entry; // entry point 초기화
-	// rip: 프로그램 카운터(실행할 다음 인스트럭션의 메모리 주소)
+	// rip: 프로그램 카운터(실행할 다음 인스트럭션의 메모리  주소)
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
@@ -660,7 +659,7 @@ load(const char *file_name, struct intr_frame *if_)
 done:
 	/* We arrive here whether the load is successful or not. */
 	// 파일을 여기서 닫지 않고 스레드가 삭제될 때 process_exit에서 닫는다.
-	//file_close(file);
+	// file_close(file);
 	return success;
 }
 
@@ -807,6 +806,12 @@ setup_stack(struct intr_frame *if_)
  * with palloc_get_page().
  * Returns true on success, false if UPAGE is already mapped or
  * if memory allocation fails. */
+/* 사용자 가상 주소 UPAGE에서 커널 가상 주소 KPAGE로의 매핑을 페이지 테이블에 추가합니다.
+WRITABLE이 참인 경우, 사용자 프로세스가 페이지를 수정할 수 있습니다;
+그렇지 않으면 읽기 전용입니다.
+UPAGE는 이미 매핑되어서는 안 됩니다.
+KPAGE는 아마도 palloc_get_page()로 사용자 풀에서 가져온 페이지일 것입니다.
+성공 시 true를 반환하고, UPAGE가 이미 매핑되어 있거나 메모리 할당에 실패한 경우 false를 반환합니다. */
 static bool
 install_page(void *upage, void *kpage, bool writable)
 {
@@ -816,6 +821,114 @@ install_page(void *upage, void *kpage, bool writable)
 	 * address, then map our page there. */
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
 }
+
+#else
+/* From here, codes will be used after project 3.
+ * If you want to implement the function for only project 2, implement it on the
+ * upper block. */
+
+/*pro3 추가*/
+struct lazy_load_arg
+{
+	struct file *file;
+	off_t ofs;
+	uint32_t read_bytes;
+	uint32_t zero_bytes;
+};
+static bool
+lazy_load_segment(struct page *page, void *aux)
+{
+	/* TODO: Load the segment from the file */
+	// 파일에서 세그먼트를 로드하세요
+	/* TODO: This called when the first page fault occurs on address VA. */
+	// 이 함수는 주소 VA에서 첫 페이지 폴트가 발생할 때 호출됩니다.
+	/* TODO: VA is available when calling this function. */
+	// 이 함수가 호출할 때 VA는 사용 가능합니다
+
+	struct lazy_load_arg *lazy_load_arg = (struct lazy_load_arg *)aux;
+	file_seek(lazy_load_arg->file, lazy_load_arg->ofs);
+	if (file_read(lazy_load_arg->file, page->frame->kva, lazy_load_arg->read_bytes) != (int)(lazy_load_arg->read_bytes))
+	{
+		palloc_free_page(page->frame->kva);
+		return false;
+	}
+	memset(page->frame->kva + lazy_load_arg->read_bytes, 0, lazy_load_arg->zero_bytes);
+	// free(lazy_load_arg);
+
+	return true;
+}
+
+/* Loads a segment starting at offset OFS in FILE at address
+ * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
+ * memory are initialized, as follows:
+ *
+ * - READ_BYTES bytes at UPAGE must be read from FILE
+ * starting at offset OFS.
+ *
+ * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
+ *
+ * The pages initialized by this function must be writable by the
+ * user process if WRITABLE is true, read-only otherwise.
+ *
+ * Return true if successful, false if a memory allocation error
+ * or disk read error occurs. */
+static bool
+load_segment(struct file *file, off_t ofs, uint8_t *upage,
+		uint32_t read_bytes, uint32_t zero_bytes, bool writable)
+{
+	ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+	ASSERT(pg_ofs(upage) == 0);
+	ASSERT(ofs % PGSIZE == 0);
+
+	while (read_bytes > 0 || zero_bytes > 0)
+	{
+		/* Do calculate how to fill this page.
+		 * We will read PAGE_READ_BYTES bytes from FILE
+		 * and zero the final PAGE_ZERO_BYTES bytes. */
+		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+		size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+		/* TODO: Set up aux to pass information to the lazy_load_segment. */
+		// void *aux = NULL;
+		struct lazy_load_arg *lazy_load_arg = (struct lazy_load_arg *)malloc(sizeof(struct lazy_load_arg));
+		lazy_load_arg->file = file;
+		lazy_load_arg->ofs = ofs;
+		lazy_load_arg->read_bytes = page_read_bytes;
+		lazy_load_arg->zero_bytes = page_zero_bytes;
+
+		if (!vm_alloc_page_with_initializer(VM_ANON, upage,
+					writable, lazy_load_segment, lazy_load_arg))
+			return false;
+
+		/* Advance. */
+		read_bytes -= page_read_bytes;
+		zero_bytes -= page_zero_bytes;
+		upage += PGSIZE;
+		ofs += page_read_bytes;
+	}
+	return true;
+}
+
+/* Create a PAGE of stack at the USER_STACK. Return true on success. */
+static bool
+setup_stack(struct intr_frame *if_)
+{
+	bool success = false;
+	void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
+
+	/* TODO: Map the stack on stack_bottom and claim the page immediately.
+	 * TODO: If success, set the rsp accordingly.
+	 * TODO: You should mark the page is stack. */
+	/* TODO: Your code goes here */
+	if (vm_alloc_page_with_initializer(VM_ANON | VM_MARKER_0, stack_bottom, 1, NULL, NULL))
+	{
+		success = vm_claim_page(stack_bottom);
+		if (success)
+			if_->rsp = USER_STACK;
+	}
+	return success;
+}
+#endif /* VM */
 
 // 파일 객체에 대한 파일 디스크립터를 생성하는 함수
 int process_add_file(struct file *f)
@@ -883,76 +996,3 @@ struct thread *get_child_process(int pid)
 	 * NULL 반환 */
 	return NULL;
 }
-
-#else
-/* From here, codes will be used after project 3.
- * If you want to implement the function for only project 2, implement it on the
- * upper block. */
-
-static bool
-lazy_load_segment(struct page *page, void *aux)
-{
-/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
-}
-
-/* Loads a segment starting at offset OFS in FILE at address
- * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
- * memory are initialized, as follows:
- *
- * - READ_BYTES bytes at UPAGE must be read from FILE
- * starting at offset OFS.
- *
- * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
- *
- * The pages initialized by this function must be writable by the
- * user process if WRITABLE is true, read-only otherwise.
- *
- * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */
-static bool
-load_segment(struct file *file, off_t ofs, uint8_t *upage,
-		uint32_t read_bytes, uint32_t zero_bytes, bool writable)
-{
-	ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
-	ASSERT(pg_ofs(upage) == 0);
-	ASSERT(ofs % PGSIZE == 0);
-
-	while (read_bytes > 0 || zero_bytes > 0)
-	{
-		/* Do calculate how to fill this page.
-		 * We will read PAGE_READ_BYTES bytes from FILE
-		 * and zero the final PAGE_ZERO_BYTES bytes. */
-		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-		size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer(VM_ANON, upage,
-					writable, lazy_load_segment, aux))
-			return false;
-
-		/* Advance. */
-		read_bytes -= page_read_bytes;
-		zero_bytes -= page_zero_bytes;
-		upage += PGSIZE;
-	}
-	return true;
-}
-
-/* Create a PAGE of stack at the USER_STACK. Return true on success. */
-static bool
-setup_stack(struct intr_frame *if_)
-{
-	bool success = false;
-	void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
-
-	return success;
-}
-#endif /* VM */

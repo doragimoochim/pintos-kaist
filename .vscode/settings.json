@@ -4,6 +4,7 @@
         "interrupt.h": "c",
         "synch.h": "c",
         "file.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "list.h": "c"
     }
 }
