@@ -259,28 +259,43 @@ palloc_init (void) {
    then the pages are filled with zeros.  If too few pages are
    available, returns a null pointer, unless PAL_ASSERT is set in
    FLAGS, in which case the kernel panics. */
+   // 요청한 페이지 수에 따라 페이지를 할당하고
+   // 필요에 따라 초기화하여 할당된 페이지들의 시작 주소를 반환하는 역할 수행
 void *
-palloc_get_multiple (enum palloc_flags flags, size_t page_cnt) {
+    palloc_get_multiple (enum palloc_flags flags, size_t page_cnt) {
+	//flags매개변수에서 PAL_USER플래그가 있는지 확인하여 할당할 풀 결정
+	// PAL_USER플래그가 있다면 user_pool을 그렇지 않다면 kernel_pool사용
 	struct pool *pool = flags & PAL_USER ? &user_pool : &kernel_pool;
 
+	// 풀 잠금 획득. 다중 페이지 할당 중 다른 스레드가 동시에 접근하지 못하도록
 	lock_acquire (&pool->lock);
+	//풀에서 사용되지 않은 페이지 검색하고 해당 페이지를 사용으로 표시, page_cnt만큼 연속적인 페이지 찾기
 	size_t page_idx = bitmap_scan_and_flip (pool->used_map, 0, page_cnt, false);
+	// 풀의 잠금 해제
 	lock_release (&pool->lock);
+	// 페이지 할당여부 확인
 	void *pages;
 
+	// 페이지 할당, pool->base는 풀의 기점 주소
+	// PGSIZE*page_idx를 더하여 실제 할당된 페이지의 주소(pages)를 계산
+	// 할당된 페이지들은 연속적으로 배치
 	if (page_idx != BITMAP_ERROR)
 		pages = pool->base + PGSIZE * page_idx;
 	else
 		pages = NULL;
 
+	// 할당된 페이지가 있는 경우 PAL_ZERO 플래그가 설정되어있다
+	// memset함수 사용하여 페이지를 0으로 초기화
 	if (pages) {
 		if (flags & PAL_ZERO)
 			memset (pages, 0, PGSIZE * page_cnt);
+	// 페이지가 할당되지 않은 경우, flags에서 PAL_ASSERT 플래그가 설정되어 있다면 
+	// PANIC 매크로를 사용하여 페이지가 부족하다는 오류 발생
 	} else {
 		if (flags & PAL_ASSERT)
 			PANIC ("palloc_get: out of pages");
 	}
-
+	// 할당된 페이지들의 시작 주소인 pages를 반환
 	return pages;
 }
 

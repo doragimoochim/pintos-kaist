@@ -15,6 +15,7 @@
 #include "lib/kernel/stdio.h"
 #include "threads/palloc.h"
 #include "lib/stdio.h"
+#include "vm/vm.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -33,6 +34,11 @@ void close(int fd);
 tid_t fork(const char *thread_name, struct intr_frame *f);
 int exec(const char *cmd_line);
 int wait(int pid);	//선언
+/*pro 3 추가*/
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap(void *addr);
+/*여기까지*/
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -68,9 +74,11 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	// TODO: Your implementation goes here.
 	/* pro-2 추가 */
 	int syscall_n = f->R.rax; /* 시스템 콜 넘버 */
-// #ifdef VM //추가입력후 주석처리
-	// thread_current()->rsp = f->rsp;
-// #endif
+	/*pro3 추가*/
+#ifdef VM
+	thread_current()->rsp = f->rsp;
+#endif
+/*여기까지*/
 	switch (syscall_n)
 	{
 	case SYS_HALT:
@@ -115,6 +123,13 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	case SYS_CLOSE:
 		close(f->R.rdi);
 		break; //교수님 말씀
+	/*pro3 추가*/
+	case SYS_MMAP:
+		f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+		break;
+	case SYS_MUNMAP:
+		munmap(f->R.rdi);
+		break;
 	} //여기까지
 
 	// printf ("system call!\n");
@@ -160,8 +175,16 @@ void exit(int status)
 
 bool create(const char *file, unsigned initial_size)
 {
+	/*pro3 추가*/
+	lock_acquire(&filesys_lock);
+	/*여기까지*/
 	check_address(file);
-	return filesys_create(file, initial_size);
+	/*pro3추가*/
+	bool success = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	return success;
+	/*여기까지*/
+	// return filesys_create(file, initial_size);
 }
 
 bool remove(const char *file)
@@ -173,12 +196,19 @@ bool remove(const char *file)
 int open(const char *file_name)
 {
 	check_address(file_name);
+	/*pro3 추가*/
+	lock_acquire(&filesys_lock);
 	struct file *file = filesys_open(file_name);
 	if (file == NULL)
+	{
+		lock_release(&filesys_lock);
 		return -1;
+	}	
 	int fd = process_add_file(file);
 	if (fd == -1)
 		file_close(file);
+	lock_release(&filesys_lock);
+	/*여기까지*/
 	return fd;
 }
 
@@ -246,6 +276,15 @@ int read(int fd, void *buffer, unsigned size)
 			lock_release(&filesys_lock);
 			return -1;
 		}
+		/*pro3 추가*/
+		struct page *page = spt_find_page(&thread_current()->spt, buffer);
+		if (page && !page->writable)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+
+		}
+		/*여기까지*/
 		bytes_read = file_read(file, buffer, size);
 		lock_release(&filesys_lock);
 	}
@@ -317,4 +356,33 @@ int exec(const char *cmd_line)
 int wait(int pid)
 {
 	return process_wait(pid);
+}
+
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
+{
+	if (!addr || addr != pg_round_down(addr))
+		return NULL;
+	
+	if (offset != pg_round_down(offset))
+		return NULL;
+	
+	if (!is_user_vaddr(addr) || !is_user_vaddr(addr + length))
+		return NULL;
+	
+	if (spt_find_page(&thread_current()->spt, addr))
+		return NULL;
+	
+	struct file *f = process_get_file(fd);
+	if (f == NULL)
+		return NULL;
+
+	if (file_length(f) == 0 || (int)length <= 0)
+		return NULL;
+
+	return do_mmap(addr, length, writable, f, offset);	//파일이 매핑된 가상 주소 반환
+}
+
+void munmap(void *addr)
+{
+	do_munmap(addr);
 }

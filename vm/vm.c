@@ -5,6 +5,7 @@
 #include "threads/mmu.h"	//pro3 추가
 #include "vm/vm.h"
 #include "vm/inspect.h"
+#include "userprog/process.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -18,6 +19,8 @@ void vm_init(void)
 	register_inspect_intr();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	// list_init(&frame_table);
+	// lock_init(&frame_table_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -119,6 +122,7 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 {
+	hash_delete(&spt->spt_hash, &page->hash_elem);
 	vm_dealloc_page(page);
 	return true;
 }
@@ -129,7 +133,28 @@ vm_get_victim(void)
 {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
+	// struct thread *cur = thread_current();
 
+	// lock_acquire(&frame_table_lock);
+	// struct list_elem *start = list_begin(&frame_table);
+	// for (start; start != list_end(&frame_table); start = list_next(start))
+	// {
+	// 	victim = list_entry(start, struct frame, frame_elem);
+	// 	if (victim->page == NULL)	//frame에 할당된 페이지가 없는 경우(page가 destroy된 경우)
+	// 	{
+	// 		lock_release(&frame_table_lock);
+	// 		return victim;
+	// 	}
+	// 	if (pml4_is_accessed(cur->pml4, victim->page->va))
+	// 			pml4_set_accessed(cur->pml4, victim->page->va, 0);
+	// 	else
+	// 	{
+	// 		lock_release(&frame_table_lock);
+	// 		return victim;
+	// 	}
+
+	// }
+	// lock_release(&frame_table_lock);
 	return victim;
 }
 
@@ -140,8 +165,10 @@ vm_evict_frame(void)
 {
 	struct frame *victim UNUSED = vm_get_victim();
 	/* TODO: swap out the victim and return the evicted frame. */
+	if (victim->page)
+			swap_out(victim->page);
 
-	return NULL;
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -156,13 +183,21 @@ vm_get_frame(void)
 	// pro3 추가
 	void *kva = palloc_get_page(PAL_USER); // user pool에서 새로운 physical page를 가져온다.
 
-	if (kva == NULL)   // page 할당 실패 -> 나중에 swap_out 처리
-		PANIC("todo"); // OS를 중지시키고, 소스 파일명, 라인 번호, 함수명 등의 정보와 함께 사용자 지정 메시지를 출력
+	// if (kva == NULL)   // page 할당 실패 -> 나중에 swap_out 처리
+	// {
+	// 	struct frame *victim = vm_evict_frame();
+	// 	victim->page = NULL;
+	// 	return victim;
+	// }
+		// PANIC("todo"); // OS를 중지시키고, 소스 파일명, 라인 번호, 함수명 등의 정보와 함께 사용자 지정 메시지를 출력
 
 	frame = (struct frame *)malloc(sizeof(struct frame)); // 프레임 할당
 	frame->kva = kva;									  // 프레임 멤버 초기화
 	frame->page = NULL;									  // 여기까지
 
+	// lock_acquire(&frame_table_lock);
+	// list_push_back(&frame_table, &frame->frame_elem);
+	// lock_release(&frame_table_lock);
 	ASSERT(frame != NULL);
 	ASSERT(frame->page == NULL);
 	return frame;
@@ -172,6 +207,11 @@ vm_get_frame(void)
 static void
 vm_stack_growth(void *addr UNUSED)
 {
+	/*pro3 추가*/
+	/*스택 크기를 증가시키기 위해 anon page를 하나 이상 할당하여 주어진 주소(addr)가 더 이상 예외 주소(faulted address)가 되지 않도록 합니다*/
+	/*할당할 때 addr을 PGSIZE로 내림하여 처리*/
+	vm_alloc_page(VM_ANON | VM_MARKER_0, pg_round_down(addr),1);
+	/*여기까지*/
 }
 
 /* Handle the fault on write_protected page */
@@ -181,6 +221,11 @@ vm_handle_wp(struct page *page UNUSED)
 }
 
 /* Return true on success */
+/*
+ *not_present; // True: not-present page, false: writing r/o page.
+ *write;	  // True: access was write, false: access was read.
+ *user;		  // True: access by user, false: access by kernel.
+ */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 						 bool user UNUSED, bool write UNUSED, bool not_present UNUSED)
 {
@@ -196,6 +241,18 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	
 	if (not_present) // 접근한 메모리의 physical page가 존재하지 않은 경우
 	{
+		/*pro3 추가*/
+		/*TODO: Validate the fault*/
+		//todo: 페이지 폴트가 스택 확장에 대한 유효한 경우인지를 확인해야 함
+		void *rsp = f->rsp;	// user access인 경우 rsp는 유저 stack을 가리킨다
+		if (!user)
+			rsp = thread_current()->rsp;
+		
+		//스택 확장으로 처리할 수 있는 폴트인 경우, vm_stack_growth를 호출
+		if ((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK))
+			vm_stack_growth(addr);
+			/*여기까지*/
+			
 		page = spt_find_page(spt, addr);
 		if (page == NULL)
 			return false;
@@ -296,8 +353,27 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			continue;
 		}
 
-		/* 2) type이 uninit이 아니면 */
-		if (!vm_alloc_page_with_initializer(type, upage, writable, NULL, NULL)) // uninit page 생성 & 초기화
+		/* 2) type이 file이면 */
+		if (type == VM_FILE)
+		{
+			struct lazy_load_arg *file_aux = malloc(sizeof(struct lazy_load_arg));
+			file_aux->file = src_page->file.file;
+			file_aux->ofs = src_page->file.ofs;
+			file_aux->read_bytes = src_page->file.read_bytes;
+			file_aux->zero_bytes = src_page->file.zero_bytes;
+			if (!vm_alloc_page_with_initializer(type, upage, writable, NULL, file_aux)) // uninit page 생성 & 초기화
+			// init(lazy_load_segment)는 page_fault가 발생할때 호출됨
+			// 지금 만드는 페이지는 page_fault가 일어날 때까지 기다리지 않고 바로 내용을 넣어줘야 하므로 필요 없음
+				return false;
+			struct page *file_page = spt_find_page(dst, upage);
+			file_backed_initializer(file_page, type, NULL);
+			// file_page->frame = src_page->frame;
+			pml4_set_page(thread_current()->pml4, file_page->va, src_page->frame->kva, src_page->writable);
+			continue;
+		}
+
+		/* 3) type이 anon이면 */
+		if (!vm_alloc_page(type, upage, writable)) // uninit page 생성 & 초기화
 			// init(lazy_load_segment)는 page_fault가 발생할때 호출됨
 			// 지금 만드는 페이지는 page_fault가 일어날 때까지 기다리지 않고 바로 내용을 넣어줘야 하므로 필요 없음
 			return false;

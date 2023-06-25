@@ -237,7 +237,7 @@ pml4_set_page (uint64_t *pml4, void *upage, void *kpage, bool rw) {
 	ASSERT (pml4 != base_pml4);
 
 	uint64_t *pte = pml4e_walk (pml4, (uint64_t) upage, 1);
-
+ 
 	if (pte)
 		*pte = vtop (kpage) | PTE_P | (rw ? PTE_W : 0) | PTE_U;
 	return pte != NULL;
@@ -247,6 +247,9 @@ pml4_set_page (uint64_t *pml4, void *upage, void *kpage, bool rw) {
  * directory PD.  Later accesses to the page will fault.  Other
  * bits in the page table entry are preserved.
  * UPAGE need not be mapped. */
+/* PD에서 사용자 가상 페이지 UPAGE를 "존재하지 않음"으로 표시
+ * 이후에 해당 페이지에 접근하면 page fault 발생
+ * UPAGE가 현재 매핑되어 있지 않아도 이 기능 사용 가능*/
 void
 pml4_clear_page (uint64_t *pml4, void *upage) {
 	uint64_t *pte;
